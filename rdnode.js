@@ -4,6 +4,8 @@ var RDNode;
 (function (RDNode_1) {
     var output = true;
     var debug = false;
+    var snapshot = true;
+    var graphcount = 0;
     function log(text) {
         if (!output) {
             return;
@@ -46,14 +48,19 @@ var RDNode;
             this.env = env;
             this.uniqueId = uniqueId;
         }
+        RDNode.prototype.toNodeSymbol = function (graphid) {
+            if (graphid === void 0) { graphid = ""; }
+            return "\"id" + this.uniqueId + "(d=" + this.fromStart + ")" + ":" + graphid + "\"";
+        };
         RDNode.prototype.toString = function (typ, table) {
             var _this = this;
             if (typ === void 0) { typ = "dot"; }
             if (table === void 0) { table = {}; }
+            var graphIdstr = graphcount.toString();
             var ret = "";
             table[this.uniqueId] = true;
             this.to.forEach(function (n) {
-                ret += _this.uniqueId + " -> " + n.to.uniqueId + ("[label=\"" + n.distance + "\"] ;\n");
+                ret += _this.toNodeSymbol(graphIdstr) + " -> " + n.to.toNodeSymbol(graphIdstr) + ("[label=\"" + n.distance + "\"] ;\n");
                 if (table[n.to.uniqueId]) {
                     return;
                 }
@@ -70,7 +77,23 @@ var RDNode;
             }
             var ret = this.from[0];
             this.from.forEach(function (x) {
-                if (ret.distance > x.distance) {
+                if (ret.from == null) {
+                    ret = x;
+                    return;
+                }
+                if (ret.from.fromStart == null) {
+                    ret = x;
+                }
+                if (x.from == null) {
+                    return;
+                }
+                if (x.from.from == null) {
+                    return;
+                }
+                logDebug("min check1:" + ret.from.toNodeSymbol() + "distance:" + ret.distance);
+                logDebug("min check2:" + x.from.toNodeSymbol() + "distance:" + x.distance);
+                if (ret.from.fromStart + ret.distance > x.from.fromStart + x.distance) {
+                    logDebug("min update" + x.from.toNodeSymbol());
                     ret = x;
                 }
             });
@@ -156,11 +179,13 @@ var RDNode;
         if (lines === void 0) { lines = []; }
         if (typ === void 0) { typ = "dot"; }
         var list = [];
-        var first = "digraph graph_name {\n";
+        graphcount++;
+        var graphIDStr = (graphcount).toString();
+        var first = "subgraph cluster" + graphIDStr + " {\n";
         list.push(first);
-        var edge = "edge [style = \"solid\"];";
+        var edge = "edge [style = \"solid\"];\n";
         list.push(edge);
-        var node = "node [color = \"#000000\"];";
+        var node = "node [color = \"#000000\"]\n;";
         list.push(node);
         var colorList = ["\"#00FF00\"", "\"#FF0000\"", "\"#0000FF\""];
         if (lines.length != 0) {
@@ -170,7 +195,7 @@ var RDNode;
                     color = "\"#888888\"";
                 }
                 line.forEach(function (t) {
-                    var el = t.uniqueId + (" [color=" + color + "] ;\n");
+                    var el = t.toNodeSymbol(graphIDStr) + (" [color=" + color + "] ;\n");
                     list.push(el);
                 });
             });
@@ -218,8 +243,10 @@ var RDNode;
         node5.toGoal = 1;
         node6.toGoal = 1;
         // console.log(getString(node1))
+        console.log("digraph graph_name {\n");
         var result = search_Dijkstra("7", node1);
         console.log(getString(node1, [result.history, result.result.parents(node1.uniqueId)]));
+        console.log("}\n");
     }
     RDNode_1.treeTest = treeTest;
     // export function searchTest() {
@@ -242,17 +269,20 @@ var RDNode;
         var _loop_1 = function () {
             logDebug("Search:");
             ifdebug(function () { logList(list); });
-            var target = list.pop();
+            var target = list.shift();
             if (!target) {
+                logDebug("nothing..");
                 return { value: { result: null, history: history } };
             }
             history.push(target);
-            if (target.uniqueId == goal) {
-                logDebug("find!");
-                return { value: { result: target, history: history } };
+            if (snapshot) {
+                var parents = target.parents(node.uniqueId);
+                var st = getString(node, [history, parents]);
+                log(st);
             }
             /// targetからつながっているノードの更新
             var nextTarget = null;
+            var waitNodes = [];
             target.to.forEach(function (n) {
                 if (!n.to) {
                     return;
@@ -268,13 +298,26 @@ var RDNode;
                     n.to.fromStart = fromStart;
                 }
                 if (nextTarget.fromStart == null || nextTarget.fromStart > n.to.fromStart) {
+                    if (nextTarget) {
+                        waitNodes.push(nextTarget);
+                    }
                     nextTarget = n.to;
                 }
+                else {
+                    waitNodes.push(n.to);
+                }
             });
-            if (nextTarget) {
+            if (nextTarget != null) {
                 target.closed = true;
+                if (nextTarget.uniqueId == goal) {
+                    logDebug("find!");
+                    return { value: { result: nextTarget, history: history } };
+                }
                 list.push(nextTarget);
             }
+            waitNodes.forEach(function (n) {
+                list.push(n);
+            });
         };
         while (true) {
             var state_1 = _loop_1();
