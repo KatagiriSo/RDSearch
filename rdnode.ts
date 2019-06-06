@@ -2,6 +2,8 @@ export namespace RDNode {
 
     let output = true
     let debug = false
+    let snapshot = true
+    let graphcount = 0
 
     interface Identifier {
         id: string
@@ -62,12 +64,17 @@ export namespace RDNode {
             this.uniqueId = uniqueId
         }
 
-        toString(typ: "dot" = "dot", table:any = {}): string {
+        toNodeSymbol(graphid:string = ""): string {
+            return "\"id" + this.uniqueId + "(d=" + this.fromStart + ")" +":"+graphid+  "\"";
+        }
+
+        toString(typ: "dot" = "dot", table: any = {}): string {
+            const graphIdstr = graphcount.toString()
             let ret = ""
             table[this.uniqueId] = true
             this.to.forEach((n) => {
 
-                ret += this.uniqueId + " -> " + n.to!.uniqueId + `[label="${n.distance}"] ;\n`
+                ret += this.toNodeSymbol(graphIdstr) + " -> " + n.to!.toNodeSymbol(graphIdstr) + `[label="${n.distance}"] ;\n`
                 if (table[n.to!.uniqueId]) {
                     return
                 }
@@ -85,12 +92,33 @@ export namespace RDNode {
             }
             let ret = this.from[0]
             this.from.forEach((x) => {
-                if (ret.distance > x.distance) {
+                if (ret.from == null) {
+                    ret = x
+                    return
+                }
+                if (ret.from.fromStart == null) {
+                    ret = x
+                }
+
+                if (x.from == null) {
+                    return
+                }
+                if (x.from.from == null) {
+                    return
+                }
+                logDebug("min check1:" + ret.from!.toNodeSymbol() + "distance:" + ret.distance);
+                logDebug("min check2:" + x.from!.toNodeSymbol() + "distance:" + x.distance);
+                if (ret.from!.fromStart! + ret.distance > x.from!.fromStart! + x.distance) {
+                    logDebug("min update" + x.from.toNodeSymbol());
                     ret = x
                 }
             })
             return ret.from
         }
+        
+
+
+
 
         parents(rootUniqueId:string): RDNode[] {
             if (this.uniqueId == rootUniqueId) {
@@ -180,15 +208,18 @@ export namespace RDNode {
     //     return makeRandomTree(ls)
     // }
 
+
     function getString(tree: RDNode, lines: RDNode[][] = [], typ: "dot" = "dot") {
         let list: string[] = []
-        const first = "digraph graph_name {\n"
+        graphcount++
+        const graphIDStr = (graphcount).toString()
+        const first = `subgraph cluster${graphIDStr} {\n`
         list.push(first)
 
-        const edge = "edge [style = \"solid\"];"
+        const edge = "edge [style = \"solid\"];\n"
         list.push(edge)
 
-        const node = "node [color = \"#000000\"];"
+        const node = `node [color = \"#000000\"]\n;`
         list.push(node)
 
         const colorList = ["\"#00FF00\"", "\"#FF0000\"", "\"#0000FF\""]
@@ -199,7 +230,7 @@ export namespace RDNode {
                     color = "\"#888888\""
                 }
                 line.forEach((t) => {
-                    const el = t.uniqueId + ` [color=${color}] ;\n`
+                    const el = t.toNodeSymbol(graphIDStr) + ` [color=${color}] ;\n`
                     list.push(el)
                 })
 
@@ -262,10 +293,12 @@ export namespace RDNode {
 
         // console.log(getString(node1))
 
+        console.log("digraph graph_name {\n");
+
         const result = search_Dijkstra("7", node1)
 
-     
         console.log(getString(node1, [result.history, result.result!.parents(node1.uniqueId)]))
+        console.log("}\n")
     }
 
 
@@ -293,20 +326,23 @@ export namespace RDNode {
         node.fromStart = 0
 
         while (true) {
-            logDebug("Search:")
+            logDebug("Search:")            
             ifdebug(() => { logList(list) })
-            let target = list.pop()
+            let target = list.shift()
             if (!target) {
+                logDebug("nothing..")
                 return { result: null, history: history }
             }
             history.push(target)
-            if (target.uniqueId == goal) {
-                logDebug("find!")
-                return { result: target, history: history }
+            if (snapshot) {
+                const parents = target.parents(node.uniqueId);
+                const st = getString(node, [history, parents])
+                log(st);
             }
 
             /// targetからつながっているノードの更新
-            let nextTarget:RDNode|null = null
+            let nextTarget: RDNode | null = null
+            let waitNodes: RDNode[] = []
             target.to.forEach((n) => {                
                 if (!n.to) {
                     return
@@ -323,13 +359,29 @@ export namespace RDNode {
                 }
 
                 if (nextTarget.fromStart == null || nextTarget.fromStart > n.to.fromStart) {
-                    nextTarget = n.to
+                    if (nextTarget) {
+                        waitNodes.push(nextTarget);
+                    }
+                    nextTarget = n.to                
+                } else {
+                    waitNodes.push(n.to);
                 }
             })
-            if (nextTarget) {
+            if (nextTarget!=null) {
                 target.closed = true
-                list.push(nextTarget)
+
+                if (nextTarget!.uniqueId == goal) {
+                    logDebug("find!")
+                    return { result: nextTarget, history: history }
+                }
+
+
+
+                list.push(nextTarget)                
             }
+            waitNodes.forEach((n) => {
+                list.push(n)
+            })
         }
     }
 
